@@ -5,44 +5,120 @@ import scipy.stats as stats
 import math
 from tabulate import tabulate
 
+from typing import Tuple, Optional
+Interval = Optional[Tuple[float, float]]
+
 
 class Parameter():
-    def __init__(self, sample_func=None):
-        self.sample_func = sample_func
+
+    """Short summary.
+
+    Args:
+        param (function or scipy distribution): Either a function that takes an
+            integer and returns a numpy array with that number of samples or a
+            scipy distribution object.
+
+    Example:
+        >>> import numpy as np
+        >>> p = Parameter(lambda size: np.random.randint(100, size))
+        >>> p.sample()
+        array([81, 72, 20, 51, 72])
+
+    """
+
+    def __init__(self, param, parents=[], name=None ):
+        self._sample_func = param
+        self.parents = parents
+        self.name = name
 
     def sample(self, size):
-        x = self.sample_func(size)
-        self.logged_samples = x
+        x = self._sample_func(size)
+        self._logged_samples = x
         return x
 
-    def normal(mean, std):
-        sig = std**0.5
-        return Parameter(lambda s: sig * np.random.randn(s) + mean)
+    # PARAMETER CREATION #############################
 
-    def lognormal(mean, std):
+    @staticmethod
+    def const(value):
+        """Creates a parameter with a constant value.
+
+        Args:
+            value (float): the constant value.
+
+        Returns:
+            Parameter: The created parameter
+        """
+        return Parameter(lambda s: np.full(s, value))
+
+    @staticmethod
+    def normal(mean=0, std=1, ci=None, certainty=.9):
+        """Creates a normally disributed parameter.
+
+        Args:
+            mean (float): The mean of the distribution.  Will be ignored if
+                `ci` is given.
+            std (float): The standard deviation of the distribution.  Note
+                this is the standard deviation, not the variance. Will be
+                ignored if `ci` is given.
+            ci (tuple): A confidence interval for the values. Format is
+                a tuple (low, high).  If given, `mean` and `std` will be
+                ignored.
+            certainty (float): The certainty of the provided confidence.
+                interval.  Only used if `ci` is non-none.
+
+        Returns:
+            Parameter: The created parameter
+        """
+
+        if ci is not None:
+            a, b = ci
+            assert b > a
+            mean = (a + b) / 2
+            std = abs(b - mean) / stats.norm.ppf((1 + certainty)/2)
+        return Parameter(lambda s: std * np.random.randn(s) + mean)
+
+    @staticmethod
+    def lognormal(mean=0, std=1, ci=None, certainty=.9):
+        """Creates a log normally disributed parameter.
+
+        Args:
+            mean (float): The mean of the distribution.  Will be ignored if
+                `ci` is given.
+            std (float): The standard deviation of the distribution.  Note
+                this is the standard deviation, not the variance. Will be
+                ignored if `ci` is given.
+            ci (tuple): A confidence interval for the values. Format is
+                a tuple (low, high).  If given, `mean` and `std` will be
+                ignored.
+            certainty (float): The certainty of the provided confidence.
+                interval.  Only used if `ci` is given.
+
+        Returns:
+            Parameter: The created parameter
+        """
+        if ci is not None:
+            a, b = ci
+            assert b > a
+            a, b = math.log(a), math.log(b)
+            mean = (a + b) / 2
+            std = abs(b - mean) / stats.norm.ppf((1 + certainty)/2)
         sig = std**0.5
         return Parameter(lambda s: np.random.lognormal(mean, sig, s))
 
-    def dist_from_samples(samples):
+    @staticmethod
+    def sample_dist(samples):
+        """Creates a distribution which samples from a list
+
+        Args:
+            samples (array-like): The list to sample from
+
+        Returns:
+            Parameter: The created parameter
+
+        """
         return Parameter(lambda s: np.random.choice(samples, s))
 
-    def const(val):
-        return Parameter(lambda s: np.full(s, val))
-
-    def normal_from_range(a, b):
-        # Takes 90% CI as input
-        assert b > a
-        mean = (a + b) / 2
-        std = (b - mean) / 1.96
-        return Parameter.normal(mean, std**2)
-
-    def lognormal_from_range(a, b):
-        # Takes 90% CI as input
-        assert b > a
-        a, b = math.log(a), math.log(b)
-        mean = (a + b) / 2
-        std = (b - mean) / 1.96
-        return Parameter.lognormal(mean, std**2)
+    # OUTPUT #############################
 
     def print_summary(self, samples=10000):
         x = self.sample(samples)
@@ -63,15 +139,72 @@ class Parameter():
                      alpha=alpha)
 
     def sensitivity(p1, p2):
-        x1 = p1.logged_samples
-        x2 = p2.logged_samples
+        x1 = p1._logged_samples
+        x2 = p2._logged_samples
         assert len(x1), "p1 has no logged samples"
         assert len(x2), "p2 has no logged samples"
         assert len(x1) == len(x2), "logged samples are of different length"
 
         plt.plot(x1, x2, ".k", alpha=.2, size=1)
 
-        # Operations implimentation
+    # CUSTOM OPERATORS #############################
+
+    def where(self, condition):
+        """Restricts the values in a distribution to fufil some condition.
+
+        Note:
+            perfomance may be sub-par when condition is rarely true.
+
+        Args:
+            condition (function): A function that accepts a ndarray of samples
+                and returns an array of bools, indicating which samples
+                fufill the condition.
+        """
+
+        # TODO: make efficient
+        def cond_sample(s):
+            x = self.sample(s)
+            while not np.all(condition(x)):
+                x = np.where(condition(x), x, self.sample(s))
+            return x
+
+        return Parameter(cond_sample)
+
+    def clip(self, low, high, redraw=False):
+        """Restricts the values in a distribution to the range [low, high]
+
+        Note:
+            performance is potentially worse when redraw=True, especially when
+            little of the original distribution falls in the range.
+
+        Args:
+            low (scalar or None): Minimum value.  If None, clipping is not
+                performed on lower bound.  Not both low and high can be None.
+            high (scalar or None): Maximum value.  If None, clipping is not
+                performed on lower bound.  Not both low and high can be None.
+            redraw (Boolean): If false, values lower than min are replaced with
+                min and values higher than max are replaced with max.  If True
+                valuses outside the range are replaced with new samples drawn
+                from the range, and is equivlant to
+                `.where(lambda x: np.logical_and(min<=x, x<=max)`
+
+        Raises:
+            ValueError: if low > high
+
+        Returns:
+            Parameter: the clipped parameter
+
+        """
+        if not redraw:
+            return Parameter(lambda s: self.sample(s).clip(min, max))
+        else:
+            if low > high:
+                raise ValueError
+            return self.where(
+                    lambda x: np.logical_and(min <= x, x <= max)
+                )
+
+    # BUILT-IN OPERATORS #############################
 
     def __neg__(self):
         return Parameter(lambda s: - self.sample(s))
@@ -82,7 +215,9 @@ class Parameter():
         if isinstance(x2, numbers.Number):
             x2 = Parameter.const(x2)
 
-        return Parameter(lambda s: op(x1.sample(s), x2.sample(s)))
+        return Parameter(
+            lambda s: op(x1.sample(s), x2.sample(s)),
+            parents = [x1, x2])
 
     def __add__(self, other):
         return Parameter._op(np.add, self, other)
@@ -110,34 +245,92 @@ class Parameter():
 
 
 class Model():
+    """An object encapsulating
+
+    Attributes:
+        parameters (dictionary): Keys are names, values are the parameter
+            objects
+        inputs (list, str): List of names of the inputs, in order added.
+
+    """
 
     def __init__(self):
         self.parameters = {}
         self.inputs = []
-        self.outputs = []
+        self._name_count = 0
+
+    # PARAMETER CREATION #############################
 
     def add_param(self, name, param):
-        assert name not in self.parameters
+        """Add an non-input parameter to the model
+
+        Args:
+            param (paramer-like): A parameter or an object that can be
+                converted to one.
+            name (str): name for the parameter.  If None, a name will be
+                automatically assigned.
+
+        Returns:
+            type: Description of returned object.
+
+        """
+        # TODO: add warning for overwrite?
+        if type(param) is not Parameter:
+            param = Parameter(param)
+        if name is None:
+            name = "unnammed_param_" + str(self._name_count)
+            self._name_count += 1
+        param.name = name
         self.parameters[name] = param
 
     def add_params(self, d):
-        self.parameters.update(d)
+        """Add a dictionary of non-input parameters to the model
+
+        Args:
+            d (dict): Dictionary where the keys are names and the values are
+            parameter like
+
+        """
+        for name, param in d.items():
+            self.add_param(name, param)
 
     def add_input(self, name, param):
+        """Add an input parameter to the model
+
+        Args:
+            param (paramer-like): A parameter or an object that can be
+                converted to one.
+            name (str): name for the parameter.  If None, a name will be
+                automatically assigned.
+
+        Returns:
+            Parameter: the added input parameter
+
+        """
         self.add_param(name, param)
         self.inputs.append(name)
+        return param
 
     def add_inputs(self, d):
-        self.parameters.update(d)
+        """Add a dictionary of input parameters to the model
+
+        Args:
+            d (dict): Dictionary where the keys are names and the values are
+            parameter like
+
+        """
+        self.add_params(d)
         for n in d.keys():
             if n not in self.inputs:
                 self.inputs.append(n)
+
+    # ANALYSIS #############################
 
     def _get_logged_samples(self, p):
         if type(p) is str:
             p = self.parameters.get(p, None)
             assert p is not None, "No parameter named" + p
-        x = p.logged_samples
+        x = p._logged_samples
         assert len(x), "parameter has no logged samples"
         return x
 
@@ -160,8 +353,23 @@ class Model():
         m, y0, r, p, std_err = stats.linregress(x, y)
         return r**2
 
-    def input_r2s(self, output, samples=10000, display=True):
-        output.sample(samples)
+    def input_r2s(self, output, display=True):
+        """Generates a summary of the r^2 between one output parameter and all
+        input parameters.  r^2 is calculated assuming a linear relationship.
+
+        Args:
+            output (str or parameter): The responsive variable.  That is, we
+                measure the relationship between every input of the model and
+                this `output` parameter.  Either the parameter itself can be
+                passed or the name with which it is registered in the model.
+            display (bool): If true, a summary table is printed.
+
+        Returns:
+            list: A list where each element is a tuple of the form
+                `(name, r^2`) for each input in the model.  The list is ordered
+                by decreasing r^2 values.
+
+        """
         y = self._get_logged_samples(output)
         r2s = [(n, self._get_r2(n, y)) for n in self.inputs]
         r2s.sort(key=lambda x: x[1], reverse=True)
