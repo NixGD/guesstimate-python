@@ -5,18 +5,19 @@ import scipy.stats as stats
 import math
 from tabulate import tabulate
 
-from typing import Tuple, Optional
-Interval = Optional[Tuple[float, float]]
-
 
 class Parameter():
 
-    """Short summary.
+    """A parameter object is defined by a sample-generating function. These
+        samples may be from a matematical distribution, and they may depend on
+        the samples from other parameters.  One may create a Parameter from
+        a scipy distrubtion object, or from some custom sampling funciton.
+        For normal and log-normal distributions, use the constructors below.
 
     Args:
-        param (function or scipy distribution): Either a function that takes an
-            integer and returns a numpy array with that number of samples or a
-            scipy distribution object.
+        param (function or scipy distribution): Either a scipy distribution
+            object or a function that takes an integer and returns a numpy
+            array with that number of samples.
 
     Example:
         >>> import numpy as np
@@ -26,7 +27,7 @@ class Parameter():
 
     """
 
-    def __init__(self, param, parents=[], name=None ):
+    def __init__(self, param, parents=[], name=None):
         self._sample_func = param
         self.parents = parents
         self.name = name
@@ -121,6 +122,12 @@ class Parameter():
     # OUTPUT #############################
 
     def print_summary(self, samples=10000):
+        """Displays summary statistics and a graph of one parameter.
+
+        Args:
+            samples (int): The number of samples to use.
+
+        """
         x = self.sample(samples)
         p5 = np.percentile(x, 5)
         p95 = np.percentile(x, 95)
@@ -129,23 +136,14 @@ class Parameter():
         print(f"95th: {p95:.2f}\n")
         print(f"std: {x.std():.4f}\n")
 
-        Parameter.graph(x)
+        Parameter._graph(x)
 
-    def graph(x, alpha=1):
+    def _graph(x, alpha=1):
         buckets = 100
         weights = np.ones_like(x) / float(len(x))
         range = np.percentile(x, 0.2), np.percentile(x, 99.8)
         _ = plt.hist(x, buckets, align='mid', weights=weights, range=range,
                      alpha=alpha)
-
-    def sensitivity(p1, p2):
-        x1 = p1._logged_samples
-        x2 = p2._logged_samples
-        assert len(x1), "p1 has no logged samples"
-        assert len(x2), "p2 has no logged samples"
-        assert len(x1) == len(x2), "logged samples are of different length"
-
-        plt.plot(x1, x2, ".k", alpha=.2, size=1)
 
     # CUSTOM OPERATORS #############################
 
@@ -217,7 +215,7 @@ class Parameter():
 
         return Parameter(
             lambda s: op(x1.sample(s), x2.sample(s)),
-            parents = [x1, x2])
+            parents=[x1, x2])
 
     def __add__(self, other):
         return Parameter._op(np.add, self, other)
@@ -335,6 +333,19 @@ class Model():
         return x
 
     def sensitivity(self, p1, p2):
+        """Generates a summary of how much the second parameter depends on the
+        first.  Specifically it gives the summary statistics of a linear fit
+        between the variables, and shows a scatterplot of the last set of
+        simulated values.
+
+        Args:
+            p1 (str or parameter): The independant variable of interest.
+                We are interested the effect this parameter has on another.
+            p2 (str or parameter): The dependant variable of interest.
+                We are interested the effect that another parameter has on
+                this one.
+
+        """
         x1 = self._get_logged_samples(p1)
         x2 = self._get_logged_samples(p2)
         assert len(x1) == len(x2), "logged samples are of different length"
@@ -380,8 +391,21 @@ class Model():
         return r2s
 
     def sensitivty_comparisons(self, p1, p2):
-        x1 = self._get_logged_samples(p1)
+        """Creates a graph displaying how the most extreme values of the first
+        variable influence the values of the second variable.  The lowest 10%
+        of the sampled values of the first variable correspond to the
+        distribution in blue, while the highest 10% correspond to the
+        distribution in oragne.
+
+        Args:
+            p1 (str or parameter): The parameter from which the lowest 10% and
+                highest 10% of runs are selected.
+            p2 (str or parameter): The parameter who's values are displayed
+                in the graph.
+
+        """
+        x = self._get_logged_samples(p1)
 
         y = self._get_logged_samples(p2)
-        Parameter.graph(y[x1 < np.percentile(x1, 10)], alpha=.5)
-        Parameter.graph(y[x1 > np.percentile(x1, 90)], alpha=.5)
+        Parameter.graph(y[x < np.percentile(x, 10)], alpha=.5)
+        Parameter.graph(y[x > np.percentile(x, 90)], alpha=.5)
