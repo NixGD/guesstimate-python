@@ -12,7 +12,7 @@ Welcome to py-guesstimate's documentation!
 
 
 
-Indices and tables
+Table of Contents
 ==================
 
 * :ref:`genindex`
@@ -20,7 +20,7 @@ Indices and tables
 * :ref:`search`
 
 
-Oh my documentation
+Documentation
 ===================
 
 .. automodule:: simulator
