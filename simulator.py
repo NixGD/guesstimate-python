@@ -407,5 +407,5 @@ class Model():
         x = self._get_logged_samples(p1)
 
         y = self._get_logged_samples(p2)
-        Parameter.graph(y[x < np.percentile(x, 10)], alpha=.5)
-        Parameter.graph(y[x > np.percentile(x, 90)], alpha=.5)
+        Parameter._graph(y[x < np.percentile(x, 10)], alpha=.5)
+        Parameter._graph(y[x > np.percentile(x, 90)], alpha=.5)
