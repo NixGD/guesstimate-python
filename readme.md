@@ -10,4 +10,4 @@ This tool allows users to create distributions which correspond to their uncerta
 
 ## Instructions
 
-For an example of the usage, see the [included example](examples/Corporate Campaigns.ipynb). Documentation can be found at [readthedocs](https://guesstimate-python.readthedocs.io/en/latest/).  
+For an example of the usage, see the [included example](examples/Corporate%20Campaigns.ipynb). Documentation can be found at [readthedocs](https://guesstimate-python.readthedocs.io/en/latest/).  
